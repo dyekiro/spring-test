@@ -327,9 +327,10 @@ public class GithubService {
         System.out.println("going to getExistingFileContent");
         String existingContent = getExistingFileContent(restTemplate, orgName, repoName, filePath, branch);
 
-
+        System.out.println("existing content = "+existingContent);
         System.out.println("got out of getExistingFileContent");
         // Step 2: Append new content to existing content
+//        String updatedContent = existingContent +"\n"+ newFileContent.replaceAll("\\\\n", "\n").replaceAll("\\\\n", "\n"); // Replace "\\n" with actual newline character
         String updatedContent = existingContent +"\n"+ newFileContent.replaceAll("\\\\n", "\n"); // Replace "\\n" with actual newline character
 
 
@@ -435,10 +436,14 @@ public class GithubService {
             if (responseBody != null && responseBody.containsKey("content")) {
                 System.out.println("getExistingFileContent if");
                 String encodedContent = (String) responseBody.get("content");
-                encodedContent = encodedContent.trim();
-                System.out.println("getExistingFileContent encodedContent: "+encodedContent);
+                String encodedContentTrim = encodedContent.trim();
+                System.out.println("getExistingFileContent encodedContent: "+encodedContentTrim);
+                System.out.println("getExistingFileContent encodedContent3: "+encodedContentTrim);
+                System.out.println("getExistingFileContent encodedContent2: "+new String(Base64.getDecoder().decode(encodedContentTrim.getBytes())));
+
 //                return new String(Base64.getDecoder().decode(encodedContent));
-                return new String(Base64.getDecoder().decode(encodedContent.getBytes()));
+//                return new String(Base64.getDecoder().decode(encodedContent.getBytes()));
+                return new String(Base64.getDecoder().decode(encodedContentTrim.getBytes()));
             }
             System.out.println("getExistingFileContent else");
             return null; // Unable to extract content from response
