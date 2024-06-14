@@ -1,8 +1,5 @@
 package com.example.demo.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.text.StringEscapeUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,15 +8,16 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.core.ParameterizedTypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
@@ -73,24 +71,6 @@ public class GithubService {
         }
     }
 
-//    public String extractSha(String branchesJson, String branchName) {
-//        try {
-//            ObjectMapper mapper = new ObjectMapper();
-//            JsonNode branches = mapper.readTree(branchesJson);
-//
-//            for (JsonNode branch : branches) {
-//                if (branch.get("name").asText().equals(branchName)) {
-//                    return branch.get("commit").get("sha").asText();
-//                }
-//            }
-//
-//            throw new RuntimeException("Branch not found: " + branchName);
-//        } catch (Exception e) {
-//            logger.error("Error parsing branches JSON: {}", branchesJson, e);
-//            throw new RuntimeException("Error parsing branches JSON", e);
-//        }
-//    }
-
     public String createBranch(String orgName, String repoName, String branchName) {
         if (branchName == null || branchName.length() < 1 || branchName.length() > 255) {
             return "Error: Branch name must be between 1 and 255 characters long.";
@@ -114,7 +94,7 @@ public class GithubService {
             if (e.getStatusCode() == HttpStatus.UNPROCESSABLE_ENTITY) {
                 System.err.println("HttpClientError");
                 // Branch already exists, handle this case gracefully
-                return "{\"ref\":\"refs/heads/"+branchName+"\"";
+                return "{\"ref\":\"refs/heads/"+branchName+"\"}";
             }
 //            return "Error: " + e.getStatusCode() + " - " + e.getResponseBodyAsString();
 //            return  "{\"ref\":\"refs/heads/"+branchName+"\"";\
@@ -138,47 +118,67 @@ public class GithubService {
         if (matcher.find()) {
             // Extract the branch name from the matched group
             branchName = matcher.group(1);
-            System.out.println(branchName); // Output: myNewBranch
+            System.err.println(branchName); // Output: myNewBranch
         }
 
         return branchName;
     }
 
-    public String createCommit(String orgName, String repoName, String branchName, String filePath, String commitMessage, String newFileContent) {
+    public String createCommit(String orgName, String repoName, String branchName, String filePath,
+                               String commitMessage, MultipartFile file) throws IOException {
+
+        System.err.println("fileName: "+file.getName());
+        System.err.println("fileName original: "+file.getOriginalFilename());
+
+        int slashIndex = filePath.lastIndexOf("/");
+        if (slashIndex != -1) {
+            filePath = filePath.substring(0, slashIndex+1) + file.getOriginalFilename();
+            System.out.println("slashes found: "+filePath);
+        }else{
+            filePath = file.getOriginalFilename();
+            System.err.println("no slashes found: "+filePath);
+        }
 
         System.err.println("getBranchname: "+branchName);
         branchName = getBranchName(branchName);
         System.err.println("after getBranchName: "+branchName);
 
+        String newFileContent = new String(file.getBytes(), StandardCharsets.UTF_8);
+        System.err.println("newFileContent: "+newFileContent);
 
-        System.out.println("going to getExistingBlobSha");
+        System.err.println("going to getExistingBlobSha");
         // Step 1: Get the existing file content
         String existingBlobSha = getExistingBlobSha(restTemplate, orgName, repoName, branchName, filePath);
 //
-        System.out.println("getExistingBlobSha returned: "+existingBlobSha);
+        System.err.println("getExistingBlobSha returned: "+existingBlobSha);
 //        // Step 2: Create a new blob if the file doesn't exist or update the existing blob
-//        String newBlobSha = (existingBlobSha != null) ? updateBlob(restTemplate, orgName, repoName, existingBlobSha, newFileContent) : createBlob(restTemplate, orgName, repoName, newFileContent);
         String newBlobSha;
         if (existingBlobSha != null) {
-            System.out.println("existingBlobSha is not null");
-            newBlobSha = updateBlob(restTemplate, orgName, repoName, existingBlobSha, newFileContent,filePath, branchName);
+            System.err.println("existingBlobSha is not null");
+            newBlobSha = updateBlob(restTemplate, orgName, repoName, existingBlobSha, newFileContent,filePath,
+                    branchName, commitMessage);
         } else {
-            System.out.println("existingBlobSha is null");
-            newBlobSha = createBlob(restTemplate, orgName, repoName, newFileContent);
+            System.err.println("existingBlobSha is null");
+            newBlobSha = createBlob(restTemplate, orgName, repoName, newFileContent, filePath, branchName,
+                    commitMessage);
         }
 //
-//        System.out.println("________________________________________________________\nExisting Blob SHA: "+existingBlobSha+"\n_________________________________________________");
-        System.err.println("________________________________________________________\nNew Blob SHA: "+newBlobSha+"\n_________________________________________________");
+//        System.err.println("________________________________________________________\nExisting Blob SHA:
+//        "+existingBlobSha+"\n_________________________________________________");
+        System.err.println("________________________________________________________\nNew Blob SHA: "+newBlobSha+
+                "\n_________________________________________________");
 
 //        // Step 3: Get the current commit
         String baseTreeSha = getBaseTreeSha(restTemplate, orgName, repoName, branchName);
-//        System.out.println("________________________________________________________\nBase Tree SHA: "+baseTreeSha+"\n_________________________________________________");
+//        System.err.println("________________________________________________________\nBase Tree SHA:
+//        "+baseTreeSha+"\n_________________________________________________");
 
 //
 //        // Step 4: Create a new tree
         String newTreeSha = createTree(restTemplate, orgName, repoName, newBlobSha, filePath, baseTreeSha);
 //
-//        System.out.println("________________________________________________________\nExisting Blob SHA: "+existingBlobSha+"\n_________________________________________________");
+//        System.err.println("________________________________________________________\nExisting Blob SHA:
+//        "+existingBlobSha+"\n_________________________________________________");
 
 //        // Step 5: Create a new commit
         String newCommitSha = createCommitObject(restTemplate, orgName, repoName, commitMessage, newTreeSha, baseTreeSha);
@@ -189,16 +189,87 @@ public class GithubService {
         return newCommitSha;
     }
 
-    private String createBlob(RestTemplate restTemplate, String orgName, String repoName, String fileContent) {
-        final String uri = GITHUB_API_URL + "/repos/" + orgName + "/" + repoName + "/git/blobs";
+    private String createBlob(RestTemplate restTemplate,String orgName, String repoName, String newFileContent,
+                              String filePath,
+                              String branch
+            , String commitMessage) {
+        final String uri = "https://api.github.com/repos/" + orgName + "/" + repoName + "/contents/" + filePath;
         HttpHeaders headers = createHttpHeaders();
-        String body = "{\"content\": \"" + fileContent + "\", \"encoding\": \"utf-8\"}";
+        System.err.println("newFile getBytes: "+newFileContent.getBytes(StandardCharsets.UTF_8));
+        String encodedContent = Base64.getEncoder().encodeToString(newFileContent.getBytes(StandardCharsets.UTF_8));
+
+        String body = "{\n" +
+                "  \"message\": \"" + commitMessage + "\",\n" +
+                "  \"content\": \"" + encodedContent + "\",\n" +
+                "  \"branch\": \"" + branch + "\"\n" +
+                "}";
+        System.err.println("createBlob: "+body);
+
         HttpEntity<String> entity = new HttpEntity<>(body, headers);
 
-        ResponseEntity<Map<String, Object>> response = restTemplate.exchange(uri, HttpMethod.POST, entity, new ParameterizedTypeReference<Map<String, Object>>() {});
-        System.err.println("Create Blob: "+response);
-        return (String) response.getBody().get("sha");
+        try {
+            ResponseEntity<Map<String, Object>> response = restTemplate.exchange(uri, HttpMethod.PUT, entity, new ParameterizedTypeReference<Map<String, Object>>() {});
+            Map<String, Object> responseBody = response.getBody();
+            if (responseBody != null && responseBody.containsKey("content")) {
+                Map<String, Object> content = (Map<String, Object>) responseBody.get("content");
+                if (content.containsKey("sha")) {
+                    return (String) content.get("sha");
+                }
+            }
+            return null;
+        } catch (HttpClientErrorException e) {
+            System.err.println("HTTP Error: " + e.getStatusCode() + " - " + e.getResponseBodyAsString());
+            throw e;
+        } catch (Exception e) {
+            System.err.println("Error: " + e.getMessage());
+            throw e;
+        }
     }
+
+
+//    private String createBlob(RestTemplate restTemplate, String orgName, String repoName, String fileContent,
+//                               String branch,  String commitMessage) {
+//
+//        System.err.println("inside createBlob");
+//        final String uri = GITHUB_API_URL + "/repos/" + orgName + "/" + repoName + "/git/blobs";
+//        HttpHeaders headers = createHttpHeaders();
+//        String encodedContent = Base64.getEncoder().encodeToString(fileContent.getBytes(StandardCharsets.UTF_8));
+//        System.err.println("inside createBlob fileContent: "+fileContent);
+//        System.err.println("inside createBlob encodedContent: "+encodedContent);
+//
+////        String body = "{\"content\": \"" + fileContent + "\", \"encoding\": \"utf-8\"}";
+//        String body = "{\"content\": \"" + fileContent + "\", \"encoding\": \"utf-8\"}";
+//
+////        String body = "{\n" +
+////                "  \"message\": \"" + commitMessage + "\",\n" +
+////                "  \"content\": \"" + encodedContent + "\",\n" +
+////                "  \"branch\": \"" + branch + "\"\n" +
+////                "}";
+//        System.err.println("createBlob body: "+body);
+//        HttpEntity<String> entity = new HttpEntity<>(body, headers);
+//
+//        try {
+//            System.err.println("createBlob try ");
+//            ResponseEntity<Map<String, Object>> response = restTemplate.exchange(uri, HttpMethod.PUT, entity, new ParameterizedTypeReference<Map<String, Object>>() {});
+//            Map<String, Object> responseBody = response.getBody();
+//            if (responseBody != null && responseBody.containsKey("content")) {
+//            System.err.println("createBlob try if");
+//                Map<String, Object> content = (Map<String, Object>) responseBody.get("content");
+//                if (content.containsKey("sha")) {
+//                    return (String) content.get("sha");
+//                }
+//            }
+//            return null;
+//        } catch (HttpClientErrorException e) {
+//            System.err.println("HttpClientErrorException bleh bleh bleh");
+////            throw e;
+//            return null;
+//
+//        }
+////        ResponseEntity<Map<String, Object>> response = restTemplate.exchange(uri, HttpMethod.POST, entity, new ParameterizedTypeReference<Map<String, Object>>() {});
+////        System.err.println("Create Blob: "+response);
+////        return (String) response.getBody().get("sha");
+//    }
 
     public String getBaseTreeSha(RestTemplate restTemplate, String orgName, String repoName, String branchName) {
         final String uri = GITHUB_API_URL + "/repos/" + orgName + "/" + repoName + "/git/ref/heads/" + branchName;
@@ -258,21 +329,29 @@ public class GithubService {
     }
 
     public String getExistingBlobSha(RestTemplate restTemplate, String orgName, String repoName, String branchName, String filePath) {
-        System.out.println("in the getExistingBlobSha");
+        System.err.println("in the getExistingBlobSha");
         // Implementation to retrieve the existing blob SHA
         final String uri = GITHUB_API_URL + "/repos/" + orgName + "/" + repoName + "/contents/" + filePath + "?ref=" + branchName;
         HttpHeaders headers = createHttpHeaders();
         HttpEntity<String> entity = new HttpEntity<>(headers);
-        System.out.println("uri headers and entity got in getExistingBlobSha");
+        System.err.println("uri headers and entity got in getExistingBlobSha");
 
         try {
-            System.out.println("in try of getExistingBlobSha");
+            System.err.println("in try of getExistingBlobSha");
             ResponseEntity<Map<String, Object>> response = restTemplate.exchange(uri, HttpMethod.GET, entity, new ParameterizedTypeReference<Map<String, Object>>() {});
-            String content = (String) response.getBody().get("content");
-            return (content != null) ? (String) response.getBody().get("sha") : null;
+            System.err.println("after responseentity of getExistingBlobSha");
+//            String content = (String) response.getBody().get("content");
+            Map<String, Object> responseBody = response.getBody();
+            System.err.println("after responsebody of getExistingBlobSha");
+//            return (content != null) ? (String) response.getBody().get("sha") : null;
+            if (responseBody != null && responseBody.containsKey("sha")) {
+                return (String) responseBody.get("sha");
+            }
+            return null;
         } catch (HttpClientErrorException e) {
             System.err.println("It errors at get existing blob sha");
             if (e.getStatusCode() == HttpStatus.NOT_FOUND) {
+                System.err.println("getExistingBlobSHA HttpClientErrorException: "+e.getMessage());
                 return null; // File doesn't exist
             }
             throw e; // Other error
@@ -322,16 +401,18 @@ public class GithubService {
 //        return updatedContent;
 //    }
 
-    private String updateBlob(RestTemplate restTemplate, String orgName, String repoName, String existingBlobSha, String newFileContent, String filePath, String branch) {
+    private String updateBlob(RestTemplate restTemplate, String orgName, String repoName, String existingBlobSha,
+                              String newFileContent, String filePath, String branch, String commitMessage) {
         // Step 1: Fetch existing content of the file from the specified branch
-        System.out.println("going to getExistingFileContent");
+        System.err.println("going to getExistingFileContent");
         String existingContent = getExistingFileContent(restTemplate, orgName, repoName, filePath, branch);
 
-        System.out.println("existing content = "+existingContent);
-        System.out.println("got out of getExistingFileContent");
+        System.err.println("existing content = "+existingContent);
+        System.err.println("got out of getExistingFileContent");
         // Step 2: Append new content to existing content
 //        String updatedContent = existingContent +"\n"+ newFileContent.replaceAll("\\\\n", "\n").replaceAll("\\\\n", "\n"); // Replace "\\n" with actual newline character
-        String updatedContent = existingContent +"\n"+ newFileContent.replaceAll("\\\\n", "\n"); // Replace "\\n" with actual newline character
+//        String updatedContent = existingContent +"\n"+ newFileContent; // Replace "\\n" with actual newline character
+        String updatedContent = newFileContent; // Replace "\\n" with actual newline character
 
 
         System.err.println("this is the updated content: "+updatedContent);
@@ -344,7 +425,7 @@ public class GithubService {
         final String uri = "https://api.github.com/repos/" + orgName + "/" + repoName + "/contents/" + filePath; // Using the actual file path
         HttpHeaders headers = createHttpHeaders();
         String body = "{\n" +
-                "  \"message\": \"Append to file content\",\n" +
+                "  \"message\": \"" + commitMessage + "\",\n" +
                 "  \"content\": \"" + StringEscapeUtils.escapeJson(base64Content) + "\",\n" + // Escape special characters for JSON
                 "  \"sha\": \"" + existingBlobSha + "\",\n" +
                 "  \"branch\": \"" + branch + "\"\n" +
@@ -354,7 +435,7 @@ public class GithubService {
         try {
             ResponseEntity<Map<String, Object>> response = restTemplate.exchange(uri, HttpMethod.PUT, entity, new ParameterizedTypeReference<Map<String, Object>>() {});
             Map<String, Object> responseBody = response.getBody();
-            System.out.println("Response Body: " + responseBody); // Log the response body for inspection
+            System.err.println("Response Body: " + responseBody); // Log the response body for inspection
 
             if (responseBody != null && responseBody.containsKey("content")) {
                 Map<String, Object> content = (Map<String, Object>) responseBody.get("content");
@@ -365,7 +446,8 @@ public class GithubService {
             return null; // Unable to extract SHA from response
         } catch (HttpClientErrorException e) {
             System.err.println("HTTP Error: " + e.getRawStatusCode()); // Log the HTTP status code
-            System.err.println("Response Body: " + e.getResponseBodyAsString()); // Log the response body for error details
+            System.err.println("Response Body: " + e.getResponseBodyAsString()); // Log the response body for error
+            // details
 
             if (e.getStatusCode() == HttpStatus.CONFLICT) {
                 // Handle conflict error (e.g., file is out of date)
@@ -382,7 +464,8 @@ public class GithubService {
 //        // Step 2: Append new content to existing content
 //        String updatedContent = existingContent + "\\n" + newFileContent; // Append new content with a newline separator (adjust as needed)
 //        updatedContent = updatedContent.trim();
-////        System.out.println("________________________________________________________\nUpdated Content : "+updatedContent+"\n_________________________________________________");
+////        System.err.println("________________________________________________________\nUpdated Content :
+// "+updatedContent+"\n_________________________________________________");
 ////
 ////         Step 3: Update the file with the combined content
 //        final String uri = GITHUB_API_URL + "/repos/" + orgName + "/" + repoName + "/contents/" + filePath; // Using the actual file path
@@ -410,7 +493,8 @@ public class GithubService {
 //            return null; // Unable to extract SHA from response
 //        } catch (HttpClientErrorException e) {
 //            System.err.println("HTTP Error: " + e.getRawStatusCode()); // Log the HTTP status code
-//            System.err.println("Response Body: " + e.getResponseBodyAsString()); // Log the response body for error details
+//            System.err.println("Response Body: " + e.getResponseBodyAsString()); // Log the response body for error
+//            details
 //
 //            if (e.getStatusCode() == HttpStatus.CONFLICT) {
 //                // Handle conflict error (e.g., file is out of date)
@@ -422,33 +506,33 @@ public class GithubService {
 
 
     private String getExistingFileContent(RestTemplate restTemplate, String orgName, String repoName, String filePath, String branch) {
-        System.out.println("inside getExistingFileContent");
+        System.err.println("inside getExistingFileContent");
         final String uri = "https://api.github.com/repos/" + orgName + "/" + repoName + "/contents/" + filePath + "?ref=" + branch;
         HttpHeaders headers = createHttpHeaders();
         HttpEntity<String> entity = new HttpEntity<>(headers);
 
-        System.out.println("uri headers and entity got in getExistingFileContent");
+        System.err.println("uri headers and entity got in getExistingFileContent");
 
         try {
-            System.out.println("getExistingFileContent try");
+            System.err.println("getExistingFileContent try");
             ResponseEntity<Map<String, Object>> response = restTemplate.exchange(uri, HttpMethod.GET, entity, new ParameterizedTypeReference<Map<String, Object>>() {});
             Map<String, Object> responseBody = response.getBody();
             if (responseBody != null && responseBody.containsKey("content")) {
-                System.out.println("getExistingFileContent if");
+                System.err.println("getExistingFileContent if");
                 String encodedContent = (String) responseBody.get("content");
-                String encodedContentTrim = encodedContent.trim();
-                System.out.println("getExistingFileContent encodedContent: "+encodedContentTrim);
-                System.out.println("getExistingFileContent encodedContent3: "+encodedContentTrim);
-                System.out.println("getExistingFileContent encodedContent2: "+new String(Base64.getDecoder().decode(encodedContentTrim.getBytes())));
+                String encodedContentTrim = encodedContent.trim().replaceAll("\n", "");
+                System.err.println("getExistingFileContent encodedContent: "+encodedContentTrim);
+                System.err.println("getExistingFileContent encodedContent3: "+encodedContentTrim);
+                System.err.println("getExistingFileContent encodedContent2: "+new String(Base64.getDecoder().decode(encodedContentTrim.getBytes())));
 
 //                return new String(Base64.getDecoder().decode(encodedContent));
 //                return new String(Base64.getDecoder().decode(encodedContent.getBytes()));
                 return new String(Base64.getDecoder().decode(encodedContentTrim.getBytes()));
             }
-            System.out.println("getExistingFileContent else");
+            System.err.println("getExistingFileContent else");
             return null; // Unable to extract content from response
         } catch (HttpClientErrorException e) {
-            System.out.println("getExistingFileContent catch");
+            System.err.println("getExistingFileContent catch");
             if (e.getStatusCode() == HttpStatus.NOT_FOUND) {
                 // File not found, return empty content
                 return "";
@@ -471,7 +555,8 @@ public class GithubService {
 //            if (responseBody != null && responseBody.containsKey("content")) {
 //                String content = (String) responseBody.get("content");
 //                content = content.trim();
-////                System.err.println("________________________________________________________\nContent: "+content+"\n_________________________________________________");
+////                System.err.println("________________________________________________________\nContent:
+// "+content+"\n_________________________________________________");
 ////                System.err.println("responseBody: "+responseBody);
 ////                String cont = responseBody.get("content").toString();
 ////                System.err.println("\ncontent: "+cont);
@@ -505,7 +590,7 @@ public class GithubService {
 //        try {
 //            ResponseEntity<Map<String, Object>> response = restTemplate.exchange(uri, HttpMethod.PUT, entity, new ParameterizedTypeReference<Map<String, Object>>() {});
 //            Map<String, Object> responseBody = response.getBody();
-//            System.out.println("Response Body: " + responseBody); // Log the response body for inspection
+//            System.err.println("Response Body: " + responseBody); // Log the response body for inspection
 //
 //            if (responseBody != null && responseBody.containsKey("content")) {
 //                Map<String, Object> content = (Map<String, Object>) responseBody.get("content");
@@ -516,7 +601,8 @@ public class GithubService {
 //            return null; // Unable to extract SHA from response
 //        } catch (HttpClientErrorException e) {
 //            System.err.println("HTTP Error: " + e.getRawStatusCode()); // Log the HTTP status code
-//            System.err.println("Response Body: " + e.getResponseBodyAsString()); // Log the response body for error details
+//            System.err.println("Response Body: " + e.getResponseBodyAsString()); // Log the response body for error
+//            details
 //
 //            if (e.getStatusCode() == HttpStatus.CONFLICT) {
 //                // Handle conflict error (e.g., file is out of date)
